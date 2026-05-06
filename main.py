@@ -425,6 +425,7 @@ class ExHentaiPlugin(Star):
             f"自动清理: {'开' if self.config.get('auto_cleanup', True) else '关'}",
             f"自动撤回: {'开' if self.config.get('auto_revoke', False) else '关'}",
             f"封面预览: {'开' if self.config.get('cover_preview', True) else '关'}",
+            f"搜索封面: {'开' if self._get_bool_config('search_result_covers', False) else '关'}",
             f"调试模式: {'开' if self.config.get('debug_mode', False) else '关'}",
         ]
         yield event.plain_result("\n".join(lines))
@@ -459,16 +460,27 @@ class ExHentaiPlugin(Star):
                 yield event.plain_result(f"未找到与 '{keyword}' 相关的结果。")
                 return
 
+            include_search_covers = self._get_bool_config("search_result_covers", False)
             if _is_qq_platform(event):
-                yield event.chain_result([_build_search_forward_nodes(event, keyword, galleries)])
+                yield event.chain_result([
+                    _build_search_forward_nodes(
+                        event,
+                        keyword,
+                        galleries,
+                        include_covers=include_search_covers,
+                    )
+                ])
                 return
 
             lines = [f"搜索 '{keyword}' 结果 ({len(galleries)} 个):", ""]
             for i, g in enumerate(galleries[:10], 1):
-                lines.append(
+                line = (
                     f"{i}. [{g.gid}/{g.token}] {g.title} "
                     f"({g.filecount}P, {g.filesize_mb}MB, {g.rating:.1f})"
                 )
+                if include_search_covers and g.thumb_url:
+                    line += f"\n   封面: {g.thumb_url}"
+                lines.append(line)
             if len(galleries) > 10:
                 lines.append(f"\n... 还有 {len(galleries) - 10} 个结果")
             lines.append(f"\n使用 /exhentai info {galleries[0].gid}/{galleries[0].token} 查看详情")
@@ -826,6 +838,7 @@ def _build_search_forward_nodes(
     event: AstrMessageEvent,
     keyword: str,
     galleries,
+    include_covers: bool = False,
 ) -> Nodes:
     bot_id = _get_forward_bot_id(event)
 
@@ -837,7 +850,13 @@ def _build_search_forward_nodes(
         )
     ]
     for index, gallery in enumerate(galleries[:10], 1):
-        content = [
+        content = []
+        if include_covers and gallery.thumb_url:
+            try:
+                content.append(Image.fromURL(gallery.thumb_url))
+            except Exception:
+                pass
+        content.append(
             Plain(
                 f"{index}. {gallery.title}\n"
                 f"ID: {gallery.gid}/{gallery.token}\n"
@@ -848,7 +867,7 @@ def _build_search_forward_nodes(
                 f"查看详情: /exhentai info {gallery.gid}/{gallery.token}\n"
                 f"下载: /exhentai download {gallery.gid}/{gallery.token}"
             )
-        ]
+        )
         nodes.append(
             Node(
                 uin=bot_id,

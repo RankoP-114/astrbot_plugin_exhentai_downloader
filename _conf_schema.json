@@ -139,6 +139,12 @@
     "hint": "下载前展示封面图和详情信息",
     "default": true
   },
+  "search_result_covers": {
+    "description": "搜索结果显示封面",
+    "type": "bool",
+    "hint": "开启后搜索列表会附带封面；QQ/OneBot 合并转发中显示为图片，其他平台显示封面链接",
+    "default": false
+  },
   "debug_mode": {
     "description": "调试模式",
     "type": "bool",
