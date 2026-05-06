@@ -18,6 +18,10 @@ try:
     from astrbot.core.message.components import File
 except ImportError:
     from astrbot.api.message_components import File
+try:
+    from astrbot.core.message.message_event_result import MessageChain
+except ImportError:
+    MessageChain = None
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .exhentai.auth import (
@@ -456,6 +460,36 @@ class ExHentaiPlugin(Star):
         self._active_sessions.append(session)
         return session
 
+    async def _send_forward_with_fallback(
+        self,
+        event: AstrMessageEvent,
+        nodes: Nodes,
+        fallback_nodes: Nodes | None = None,
+        fallback_text: str = "",
+    ) -> bool:
+        if MessageChain is None:
+            return False
+        try:
+            await event.send(MessageChain([nodes]))
+            return True
+        except Exception as e:
+            self._debug_log(f"Forward send failed: {e}")
+
+        if fallback_nodes is not None:
+            try:
+                await event.send(MessageChain([fallback_nodes]))
+                return True
+            except Exception as e:
+                self._debug_log(f"Fallback forward send failed: {e}")
+
+        if fallback_text:
+            try:
+                await event.send(MessageChain([Plain(fallback_text)]))
+                return True
+            except Exception as e:
+                self._debug_log(f"Fallback text send failed: {e}")
+        return False
+
     @filter.command_group("exhentai")
     def exhentai(self):
         pass
@@ -602,30 +636,38 @@ class ExHentaiPlugin(Star):
                 cover_paths = {}
                 if include_search_covers:
                     cover_paths = await self._cache_gallery_covers(session, galleries[:10])
-                yield event.chain_result([
-                    _build_search_forward_nodes(
+                nodes = _build_search_forward_nodes(
+                    event,
+                    keyword,
+                    galleries,
+                    include_covers=include_search_covers,
+                    cover_paths=cover_paths,
+                )
+                fallback_nodes = None
+                if include_search_covers:
+                    fallback_nodes = _build_search_forward_nodes(
                         event,
                         keyword,
                         galleries,
-                        include_covers=include_search_covers,
-                        cover_paths=cover_paths,
+                        include_covers=False,
                     )
-                ])
+                sent = await self._send_forward_with_fallback(
+                    event,
+                    nodes,
+                    fallback_nodes=fallback_nodes,
+                    fallback_text=_format_search_results_text(keyword, galleries),
+                )
+                if not sent:
+                    yield event.plain_result("搜索完成，但发送结果失败。")
                 return
 
-            lines = [f"搜索 '{keyword}' 结果 ({len(galleries)} 个):", ""]
-            for i, g in enumerate(galleries[:10], 1):
-                line = (
-                    f"{i}. [{g.gid}/{g.token}] {g.title} "
-                    f"({g.filecount}P, {g.filesize_mb}MB, {g.rating:.1f})"
+            yield event.plain_result(
+                _format_search_results_text(
+                    keyword,
+                    galleries,
+                    include_covers=include_search_covers,
                 )
-                if include_search_covers and g.thumb_url:
-                    line += f"\n   封面: {g.thumb_url}"
-                lines.append(line)
-            if len(galleries) > 10:
-                lines.append(f"\n... 还有 {len(galleries) - 10} 个结果")
-            lines.append(f"\n使用 /exhentai info {galleries[0].gid}/{galleries[0].token} 查看详情")
-            yield event.plain_result("\n".join(lines))
+            )
         except Exception as e:
             logger.error(f"Search error: {e}")
             yield event.plain_result(f"搜索出错：{e}")
@@ -664,15 +706,26 @@ class ExHentaiPlugin(Star):
                 cover_path = ""
                 if self.config.get("cover_preview", True):
                     cover_path = await self._cache_gallery_cover(session, gallery)
-                yield event.chain_result([
+                footer = f"使用 /exhentai download {gallery.gid}/{gallery.token} 下载"
+                sent = await self._send_forward_with_fallback(
+                    event,
                     _build_gallery_info_forward_nodes(
                         event,
                         gallery,
-                        f"使用 /exhentai download {gallery.gid}/{gallery.token} 下载",
+                        footer,
                         include_cover=self.config.get("cover_preview", True),
                         cover_path=cover_path,
-                    )
-                ])
+                    ),
+                    fallback_nodes=_build_gallery_info_forward_nodes(
+                        event,
+                        gallery,
+                        footer,
+                        include_cover=False,
+                    ),
+                    fallback_text=f"{gallery.format_info()}\n\n{footer}",
+                )
+                if not sent:
+                    yield event.plain_result("详情获取完成，但发送结果失败。")
                 return
 
             if self.config.get("cover_preview", True) and gallery.thumb_url:
@@ -768,15 +821,26 @@ class ExHentaiPlugin(Star):
                 cover_path = ""
                 if self.config.get("cover_preview", True):
                     cover_path = await self._cache_gallery_cover(session, gallery)
-                yield event.chain_result([
+                footer = "正在获取图片列表..."
+                sent = await self._send_forward_with_fallback(
+                    event,
                     _build_gallery_info_forward_nodes(
                         event,
                         gallery,
-                        "正在获取图片列表...",
+                        footer,
                         include_cover=self.config.get("cover_preview", True),
                         cover_path=cover_path,
-                    )
-                ])
+                    ),
+                    fallback_nodes=_build_gallery_info_forward_nodes(
+                        event,
+                        gallery,
+                        footer,
+                        include_cover=False,
+                    ),
+                    fallback_text=f"{gallery.format_info()}\n\n{footer}",
+                )
+                if not sent:
+                    yield event.plain_result("画廊信息获取完成，但发送预览失败，继续下载。")
             else:
                 if self.config.get("cover_preview", True) and gallery.thumb_url:
                     try:
@@ -1109,6 +1173,27 @@ def _build_search_forward_nodes(
             )
         )
     return Nodes(nodes)
+
+
+def _format_search_results_text(
+    keyword: str,
+    galleries,
+    include_covers: bool = False,
+) -> str:
+    lines = [f"搜索 '{keyword}' 结果 ({len(galleries)} 个):", ""]
+    for i, g in enumerate(galleries[:10], 1):
+        line = (
+            f"{i}. [{g.gid}/{g.token}] {g.title} "
+            f"({g.filecount}P, {g.filesize_mb}MB, {g.rating:.1f})"
+        )
+        if include_covers and g.thumb_url:
+            line += f"\n   封面: {g.thumb_url}"
+        lines.append(line)
+    if len(galleries) > 10:
+        lines.append(f"\n... 还有 {len(galleries) - 10} 个结果")
+    if galleries:
+        lines.append(f"\n使用 /exhentai info {galleries[0].gid}/{galleries[0].token} 查看详情")
+    return "\n".join(lines)
 
 
 def _get_command_tail(event: AstrMessageEvent, *tokens: str) -> str:
