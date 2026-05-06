@@ -336,6 +336,9 @@ class ExHentaiPlugin(Star):
         thumb_url = str(getattr(gallery, "thumb_url", "") or "").strip()
         if not thumb_url:
             return ""
+        if not re.match(r"^https?://", thumb_url, re.IGNORECASE):
+            self._debug_log(f"Cover skipped non-http url for {gallery.gid}")
+            return ""
 
         cache_dir = self._get_cover_cache_dir()
         key = hashlib.sha1(thumb_url.encode("utf-8")).hexdigest()[:12]

@@ -74,7 +74,9 @@ async def search_galleries(
                         for i, meta in enumerate(gmetadatas):
                             gallery = _parse_gallery_meta(meta)
                             if i < len(results):
-                                gallery.thumb_url = results[i].get("thumb_url", "")
+                                result_thumb = results[i].get("thumb_url", "")
+                                if _is_remote_url(result_thumb):
+                                    gallery.thumb_url = result_thumb
                             galleries.append(gallery)
     except Exception as e:
         logger.error(f"Search failed: {e}")
@@ -120,13 +122,7 @@ def _parse_search_results(html: str, site_mode: str = "exhentai") -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
-        thumb = ""
-        img_tag = item.select_one("img")
-        if img_tag:
-            thumb = img_tag.get("src", "") or img_tag.get("data-src", "")
-            if thumb and not thumb.startswith("http"):
-                base = EXHENTAI_BASE if site_mode == "exhentai" else E_HENTAI_BASE
-                thumb = urljoin(base, thumb)
+        thumb = _extract_thumbnail_url(item, site_mode)
         results.append({"gid": gid, "token": token, "thumb_url": thumb})
 
     if results:
@@ -143,16 +139,69 @@ def _parse_search_results(html: str, site_mode: str = "exhentai") -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
-        thumb = ""
         container = link.find_parent(["tr", "div", "td"]) or link
-        img_tag = container.select_one("img") if hasattr(container, "select_one") else None
-        if img_tag:
-            thumb = img_tag.get("src", "") or img_tag.get("data-src", "")
-            if thumb and not thumb.startswith("http"):
-                base = EXHENTAI_BASE if site_mode == "exhentai" else E_HENTAI_BASE
-                thumb = urljoin(base, thumb)
+        thumb = _extract_thumbnail_url(container, site_mode)
         results.append({"gid": gid, "token": token, "thumb_url": thumb})
     return results
+
+
+def _extract_thumbnail_url(container, site_mode: str = "exhentai") -> str:
+    if not hasattr(container, "select"):
+        return ""
+
+    for img_tag in container.select("img"):
+        for attr in ("data-src", "data-original", "data-lazy-src", "data-url", "src"):
+            thumb = _normalize_thumbnail_url(img_tag.get(attr, ""), site_mode)
+            if thumb:
+                return thumb
+        for attr in ("data-srcset", "srcset"):
+            for srcset_url in _split_srcset(img_tag.get(attr, "")):
+                thumb = _normalize_thumbnail_url(srcset_url, site_mode)
+                if thumb:
+                    return thumb
+        for style_url in _extract_style_urls(img_tag.get("style", "")):
+            thumb = _normalize_thumbnail_url(style_url, site_mode)
+            if thumb:
+                return thumb
+
+    for styled in container.select('[style*="url("]'):
+        for style_url in _extract_style_urls(styled.get("style", "")):
+            thumb = _normalize_thumbnail_url(style_url, site_mode)
+            if thumb:
+                return thumb
+    return ""
+
+
+def _split_srcset(srcset: str) -> list[str]:
+    urls = []
+    for candidate in (srcset or "").split(","):
+        url = candidate.strip().split(" ", 1)[0].strip()
+        if url:
+            urls.append(url)
+    return urls
+
+
+def _extract_style_urls(style: str) -> list[str]:
+    return re.findall(r"url\(['\"]?([^'\")]+)['\"]?\)", style or "", re.IGNORECASE)
+
+
+def _normalize_thumbnail_url(url: str, site_mode: str = "exhentai") -> str:
+    value = (url or "").strip().strip("'\"")
+    if not value:
+        return ""
+    lower = value.lower()
+    if lower.startswith(("data:", "about:", "javascript:")):
+        return ""
+    if value.startswith("//"):
+        value = f"https:{value}"
+    elif not _is_remote_url(value):
+        base = EXHENTAI_BASE if site_mode == "exhentai" else E_HENTAI_BASE
+        value = urljoin(base, value)
+    return value if _is_remote_url(value) else ""
+
+
+def _is_remote_url(url: str) -> bool:
+    return bool(re.match(r"^https?://", (url or "").strip(), re.IGNORECASE))
 
 
 async def get_gallery_metadata(
