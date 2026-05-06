@@ -39,6 +39,7 @@ from .exhentai.api import (
 )
 from .exhentai.downloader import download_images
 from .exhentai.packager import pack_zip, pack_pdf
+from .exhentai.image_processor import process_cover
 
 
 AUTH_HELP = (
@@ -120,6 +121,15 @@ class ExHentaiPlugin(Star):
             0,
             MAX_DOWNLOAD_SIZE_MB,
         )
+
+    def _get_cover_protection_method(self) -> str:
+        return self.config.get("cover_protection_method", "gaussian")
+
+    def _get_cover_blur_radius(self) -> int:
+        return self._get_int_config("cover_blur_radius", 14, 1, 50)
+
+    def _get_cover_fgsm_eps(self) -> float:
+        return float(self._get_int_config("cover_fgsm_eps", 4, 1, 16))
 
     def _is_gallery_over_size_limit(self, gallery) -> tuple[bool, int]:
         limit_mb = self._get_max_download_size_mb()
@@ -404,6 +414,51 @@ class ExHentaiPlugin(Star):
             return ""
         return cover_path
 
+    async def _protect_cover_paths(self, cover_paths: dict[int, str]) -> dict[int, str]:
+        method = self._get_cover_protection_method()
+        if method == "none":
+            return {}
+        blur_radius = self._get_cover_blur_radius()
+        fgsm_eps = self._get_cover_fgsm_eps()
+        tasks = {
+            gid: asyncio.to_thread(
+                process_cover, path, method=method,
+                blur_radius=blur_radius, fgsm_eps=fgsm_eps,
+                suffix=f".{method}",
+            )
+            for gid, path in cover_paths.items()
+            if path
+        }
+        if not tasks:
+            return {}
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        protected_paths = {}
+        for gid, result in zip(tasks.keys(), results):
+            if isinstance(result, Exception):
+                self._debug_log(f"Protect cover failed for {gid}: {result}")
+                continue
+            if isinstance(result, str) and result:
+                protected_paths[gid] = result
+        return protected_paths
+
+    async def _protect_cover_path(self, cover_path: str) -> str:
+        if not cover_path:
+            return ""
+        method = self._get_cover_protection_method()
+        if method == "none":
+            return ""
+        blur_radius = self._get_cover_blur_radius()
+        fgsm_eps = self._get_cover_fgsm_eps()
+        try:
+            return await asyncio.to_thread(
+                process_cover, cover_path, method=method,
+                blur_radius=blur_radius, fgsm_eps=fgsm_eps,
+                suffix=f".{method}",
+            )
+        except Exception as e:
+            self._debug_log(f"Protect cover failed: {e}")
+            return ""
+
     async def _build_client_session(self) -> "aiohttp.ClientSession":
         import aiohttp
         proxy_type = self.config.get("proxy_type", "none")
@@ -465,7 +520,6 @@ class ExHentaiPlugin(Star):
         self,
         event: AstrMessageEvent,
         nodes: Nodes,
-        fallback_nodes: Nodes | None = None,
         fallback_text: str = "",
     ) -> bool:
         if MessageChain is None:
@@ -475,13 +529,6 @@ class ExHentaiPlugin(Star):
             return True
         except Exception as e:
             self._debug_log(f"Forward send failed: {e}")
-
-        if fallback_nodes is not None:
-            try:
-                await event.send(MessageChain([fallback_nodes]))
-                return True
-            except Exception as e:
-                self._debug_log(f"Fallback forward send failed: {e}")
 
         if fallback_text:
             try:
@@ -598,6 +645,8 @@ class ExHentaiPlugin(Star):
             f"自动撤回: {'开' if self.config.get('auto_revoke', False) else '关'}",
             f"封面预览: {'开' if self.config.get('cover_preview', True) else '关'}",
             f"搜索封面: {'开' if self._get_bool_config('search_result_covers', False) else '关'}",
+            f"封面保护: {self._get_cover_protection_method()} "
+            f"(模糊半径: {self._get_cover_blur_radius()}, FGSM eps: {self._get_cover_fgsm_eps()})",
             f"调试模式: {'开' if self.config.get('debug_mode', False) else '关'}",
         ]
         yield event.plain_result("\n".join(lines))
@@ -643,6 +692,10 @@ class ExHentaiPlugin(Star):
                         session,
                         galleries[:MAX_SEARCH_RESULTS_PER_PAGE],
                     )
+                    method = self._get_cover_protection_method()
+                    if method != "none":
+                        cover_paths = await self._protect_cover_paths(cover_paths)
+
                 nodes = _build_search_forward_nodes(
                     event,
                     keyword,
@@ -652,20 +705,9 @@ class ExHentaiPlugin(Star):
                     include_covers=include_search_covers,
                     cover_paths=cover_paths,
                 )
-                fallback_nodes = None
-                if include_search_covers:
-                    fallback_nodes = _build_search_forward_nodes(
-                        event,
-                        keyword,
-                        galleries,
-                        page=display_page,
-                        total_count=total_count,
-                        include_covers=False,
-                    )
                 sent = await self._send_forward_with_fallback(
                     event,
                     nodes,
-                    fallback_nodes=fallback_nodes,
                     fallback_text=_format_search_results_text(
                         keyword,
                         galleries,
@@ -724,6 +766,9 @@ class ExHentaiPlugin(Star):
                 cover_path = ""
                 if self.config.get("cover_preview", True):
                     cover_path = await self._cache_gallery_cover(session, gallery)
+                    method = self._get_cover_protection_method()
+                    if method != "none" and cover_path:
+                        cover_path = await self._protect_cover_path(cover_path)
                 footer = f"使用 /exhentai download {gallery.gid}/{gallery.token} 下载"
                 sent = await self._send_forward_with_fallback(
                     event,
@@ -733,12 +778,6 @@ class ExHentaiPlugin(Star):
                         footer,
                         include_cover=self.config.get("cover_preview", True),
                         cover_path=cover_path,
-                    ),
-                    fallback_nodes=_build_gallery_info_forward_nodes(
-                        event,
-                        gallery,
-                        footer,
-                        include_cover=False,
                     ),
                     fallback_text=f"{gallery.format_info()}\n\n{footer}",
                 )
@@ -839,6 +878,9 @@ class ExHentaiPlugin(Star):
                 cover_path = ""
                 if self.config.get("cover_preview", True):
                     cover_path = await self._cache_gallery_cover(session, gallery)
+                    method = self._get_cover_protection_method()
+                    if method != "none" and cover_path:
+                        cover_path = await self._protect_cover_path(cover_path)
                 footer = "正在获取图片列表..."
                 sent = await self._send_forward_with_fallback(
                     event,
@@ -848,12 +890,6 @@ class ExHentaiPlugin(Star):
                         footer,
                         include_cover=self.config.get("cover_preview", True),
                         cover_path=cover_path,
-                    ),
-                    fallback_nodes=_build_gallery_info_forward_nodes(
-                        event,
-                        gallery,
-                        footer,
-                        include_cover=False,
                     ),
                     fallback_text=f"{gallery.format_info()}\n\n{footer}",
                 )
@@ -1101,6 +1137,12 @@ def _is_valid_cover_file(path: str) -> bool:
     except OSError:
         return False
     return _is_cover_image(sample)
+
+
+def _create_protected_cover(source_path: str, method: str = "gaussian", blur_radius: int = 14, fgsm_eps: float = 4.0) -> str:
+    if not source_path or not _is_valid_cover_file(source_path):
+        return ""
+    return process_cover(source_path, method=method, blur_radius=blur_radius, fgsm_eps=fgsm_eps, suffix=f".{method}")
 
 
 def _build_gallery_info_forward_nodes(

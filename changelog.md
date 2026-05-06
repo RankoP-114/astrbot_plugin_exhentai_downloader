@@ -2,6 +2,32 @@
 
 本文件记录 `astrbot_plugin_exhentai_downloader` 的重要版本变更。
 
+## [1.3.8] - 2026-05-06
+
+### 新增
+
+- 新增 `cover_protection_method` 配置项：`gaussian` 高斯模糊、`fgsm` 对抗扰动、`none` 使用原图。
+- 新增 `cover_fgsm_eps` 配置项，控制 FGSM 扰动强度（1-16，默认 4）。
+- FGSM 使用纯 numpy 实现（图像梯度方向叠加扰动），不依赖 PyTorch / TensorFlow，相比高斯模糊人眼感知变化更小。
+- `status` 命令会显示当前封面保护方式、模糊半径和 FGSM eps。
+
+### 变更
+
+- 封面发送流程简化：不再先尝试原图再退回到保护封面，而是根据 `cover_protection_method` 直接决定发送哪种封面；发送失败时降级为纯文本。
+- `cover_blur_radius` 现在仅在 `cover_protection_method` 为 `gaussian` 时生效；最小值改为 1（原 0 表示关闭的用法已被 `cover_protection_method = none` 替代）。
+
+### 依赖
+
+- 新增 `numpy>=1.24`（仅 FGSM 功能需要；不开启 FGSM 时不影响安装）。
+
+## [1.3.7] - 2026-05-06
+
+### 新增
+
+- QQ / OneBot 合并转发带原图封面失败后，会自动生成高斯模糊封面再重试发送。
+- 新增 `cover_blur_radius` 配置项，可调整高斯模糊半径；设置为 `0` 时关闭模糊重试。
+- 模糊重试覆盖搜索结果、详情信息和下载前预览；模糊版仍失败时再降级到无图转发包和纯文本。
+
 ## [1.3.6] - 2026-05-06
 
 ### 修复

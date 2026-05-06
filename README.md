@@ -101,6 +101,9 @@ requests>=2.31
 | `auto_revoke` | 发送后自动撤回文件消息，仅 OneBot v11 / aiocqhttp | `false` |
 | `cover_preview` | 下载或查看详情前发送封面预览 | `true` |
 | `search_result_covers` | 搜索结果列表附带封面；QQ / OneBot 会先缓存封面再在合并转发中显示图片，其他平台显示封面链接 | `false` |
+| `cover_protection_method` | 封面保护方式：`gaussian` 高斯模糊、`fgsm` 对抗扰动、`none` 关闭；原图转发失败时用此策略生成保护后的封面重试 | `gaussian` |
+| `cover_blur_radius` | 高斯模糊半径，`cover_protection_method` 为 `gaussian` 时生效 | `14` |
+| `cover_fgsm_eps` | FGSM 扰动强度，`cover_protection_method` 为 `fgsm` 时生效，建议 2-8 | `4` |
 | `debug_mode` | 输出调试日志；日志会写入 AstrBot 日志系统 | `false` |
 
 ## 认证
@@ -157,7 +160,7 @@ ipb_member_id=123456; ipb_pass_hash=abcdef123456; igneous=mysterystring
 - 搜索页码按聊天习惯从 `1` 开始；不写页码、写 `0` 或写 `1` 都是第一页，写 `2` 表示第二页。
 - 搜索结果标题会显示“本页 N 个 / 总计 M 个”；如果站点没有返回总数，则只显示本页数量。聊天中默认展示当前页最多 25 条结果。
 - QQ / OneBot v11 平台的详情和下载前封面预览也会使用本地缓存图片发送。
-- 如果 QQ / OneBot 拒绝带图合并转发，插件会自动重发不带图的文本转发包。
+- 封面发送前会根据 `cover_protection_method` 预先处理：`gaussian` 高斯模糊、`fgsm` 对抗扰动（纯 numpy，人眼几乎无感知）、`none` 使用原图。发送失败时降级为纯文本。
 - ZIP 设置密码时会使用 AES 加密；如果加密依赖缺失或加密失败，不会回退发送未加密 ZIP。
 - PDF 设置密码时会使用 `pypdf` 加密；如果加密依赖缺失或加密失败，不会回退发送未加密 PDF。
 - 打包密码不会在聊天完成提示里回显，请在 WebUI 配置中查看或提前告知接收者。

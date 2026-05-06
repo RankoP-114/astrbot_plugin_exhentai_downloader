@@ -165,6 +165,29 @@
     "hint": "开启后搜索列表会附带封面；QQ/OneBot 合并转发中显示为图片，其他平台显示封面链接",
     "default": false
   },
+  "cover_protection_method": {
+    "description": "封面保护方式",
+    "type": "string",
+    "options": ["gaussian", "fgsm", "none"],
+    "default": "gaussian",
+    "hint": "封面转发失败时的重试保护策略：gaussian 高斯模糊、fgsm 对抗扰动、none 关闭"
+  },
+  "cover_blur_radius": {
+    "description": "封面高斯模糊半径",
+    "type": "int",
+    "hint": "cover_protection_method 为 gaussian 时的高斯模糊半径",
+    "default": 14,
+    "min": 1,
+    "max": 50
+  },
+  "cover_fgsm_eps": {
+    "description": "封面 FGSM 扰动强度",
+    "type": "int",
+    "hint": "cover_protection_method 为 fgsm 时的扰动强度，值越大扰动越明显 (建议 2-8)",
+    "default": 4,
+    "min": 1,
+    "max": 16
+  },
   "debug_mode": {
     "description": "调试模式",
     "type": "bool",
