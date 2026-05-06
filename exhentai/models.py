@@ -61,6 +61,13 @@ class ImagePage:
 
 
 @dataclass
+class SearchPage:
+    galleries: list[Gallery] = field(default_factory=list)
+    total_count: Optional[int] = None
+    page: int = 1
+
+
+@dataclass
 class DownloadTask:
     gallery: Gallery
     total_pages: int

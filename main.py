@@ -54,6 +54,7 @@ BLACKLIST_DENY = "该用户在黑名单中，无法使用此功能。"
 MAX_ACTIVE_DOWNLOADS = 1
 DEFAULT_MAX_DOWNLOAD_SIZE_MB = 100
 MAX_DOWNLOAD_SIZE_MB = 10240
+MAX_SEARCH_RESULTS_PER_PAGE = 25
 
 
 class ExHentaiPlugin(Star):
@@ -624,10 +625,12 @@ class ExHentaiPlugin(Star):
         yield event.plain_result(f"正在搜索: {keyword} (第 {display_page} 页) ...")
         session = await self._build_client_session()
         try:
-            galleries = await search_galleries(
+            search_page = await search_galleries(
                 session, self._get_cookies(), keyword, page,
                 self.config.get("site_mode", "exhentai"),
             )
+            galleries = search_page.galleries
+            total_count = search_page.total_count
             if not galleries:
                 yield event.plain_result(f"未找到与 '{keyword}' 相关的第 {display_page} 页结果。")
                 return
@@ -636,12 +639,16 @@ class ExHentaiPlugin(Star):
             if _is_qq_platform(event):
                 cover_paths = {}
                 if include_search_covers:
-                    cover_paths = await self._cache_gallery_covers(session, galleries[:10])
+                    cover_paths = await self._cache_gallery_covers(
+                        session,
+                        galleries[:MAX_SEARCH_RESULTS_PER_PAGE],
+                    )
                 nodes = _build_search_forward_nodes(
                     event,
                     keyword,
                     galleries,
                     page=display_page,
+                    total_count=total_count,
                     include_covers=include_search_covers,
                     cover_paths=cover_paths,
                 )
@@ -652,13 +659,19 @@ class ExHentaiPlugin(Star):
                         keyword,
                         galleries,
                         page=display_page,
+                        total_count=total_count,
                         include_covers=False,
                     )
                 sent = await self._send_forward_with_fallback(
                     event,
                     nodes,
                     fallback_nodes=fallback_nodes,
-                    fallback_text=_format_search_results_text(keyword, galleries, page=display_page),
+                    fallback_text=_format_search_results_text(
+                        keyword,
+                        galleries,
+                        page=display_page,
+                        total_count=total_count,
+                    ),
                 )
                 if not sent:
                     yield event.plain_result("搜索完成，但发送结果失败。")
@@ -669,6 +682,7 @@ class ExHentaiPlugin(Star):
                     keyword,
                     galleries,
                     page=display_page,
+                    total_count=total_count,
                     include_covers=include_search_covers,
                 )
             )
@@ -1128,6 +1142,7 @@ def _build_search_forward_nodes(
     keyword: str,
     galleries,
     page: int = 1,
+    total_count: int | None = None,
     include_covers: bool = False,
     cover_paths: dict[int, str] | None = None,
 ) -> Nodes:
@@ -1138,10 +1153,17 @@ def _build_search_forward_nodes(
         Node(
             uin=bot_id,
             name="ExHentai 搜索",
-            content=[Plain(f"搜索 '{keyword}' 第 {page} 页结果，共 {len(galleries)} 个。")],
+            content=[
+                Plain(
+                    f"搜索 '{keyword}' 第 {page} 页结果，"
+                    f"本页 {len(galleries)} 个"
+                    f"{_format_search_total_suffix(total_count)}。"
+                )
+            ],
         )
     ]
-    for index, gallery in enumerate(galleries[:10], 1):
+    display_galleries = galleries[:MAX_SEARCH_RESULTS_PER_PAGE]
+    for index, gallery in enumerate(display_galleries, 1):
         content = []
         cover_path = cover_paths.get(gallery.gid, "")
         if include_covers and cover_path:
@@ -1169,12 +1191,17 @@ def _build_search_forward_nodes(
             )
         )
 
-    if len(galleries) > 10:
+    if len(galleries) > len(display_galleries):
         nodes.append(
             Node(
                 uin=bot_id,
-                name="更多结果",
-                content=[Plain(f"还有 {len(galleries) - 10} 个结果未展示，请使用下一页继续搜索。")],
+                name="本页未展示",
+                content=[
+                    Plain(
+                        f"本页还有 {len(galleries) - len(display_galleries)} 个结果未展示，"
+                        f"当前最多展示前 {MAX_SEARCH_RESULTS_PER_PAGE} 个。"
+                    )
+                ],
             )
         )
     return Nodes(nodes)
@@ -1184,10 +1211,16 @@ def _format_search_results_text(
     keyword: str,
     galleries,
     page: int = 1,
+    total_count: int | None = None,
     include_covers: bool = False,
 ) -> str:
-    lines = [f"搜索 '{keyword}' 第 {page} 页结果 ({len(galleries)} 个):", ""]
-    for i, g in enumerate(galleries[:10], 1):
+    lines = [
+        f"搜索 '{keyword}' 第 {page} 页结果 "
+        f"(本页 {len(galleries)} 个{_format_search_total_suffix(total_count)}):",
+        "",
+    ]
+    display_galleries = galleries[:MAX_SEARCH_RESULTS_PER_PAGE]
+    for i, g in enumerate(display_galleries, 1):
         line = (
             f"{i}. [{g.gid}/{g.token}] {g.title} "
             f"({g.filecount}P, {g.filesize_mb}MB, {g.rating:.1f})"
@@ -1195,8 +1228,11 @@ def _format_search_results_text(
         if include_covers and g.thumb_url:
             line += f"\n   封面: {g.thumb_url}"
         lines.append(line)
-    if len(galleries) > 10:
-        lines.append(f"\n... 还有 {len(galleries) - 10} 个结果")
+    if len(galleries) > len(display_galleries):
+        lines.append(
+            f"\n... 本页还有 {len(galleries) - len(display_galleries)} 个结果未展示，"
+            f"当前最多展示前 {MAX_SEARCH_RESULTS_PER_PAGE} 个"
+        )
     if galleries:
         lines.append(f"\n使用 /exhentai info {galleries[0].gid}/{galleries[0].token} 查看详情")
     return "\n".join(lines)
@@ -1239,6 +1275,12 @@ def _parse_search_args(raw_text: str) -> tuple[str, int]:
             page = max(0, int(parts[1]))
 
     return keyword_part.strip(), page
+
+
+def _format_search_total_suffix(total_count: int | None) -> str:
+    if total_count is None:
+        return ""
+    return f" / 总计 {total_count} 个"
 
 
 def _format_search_page_number(page: int) -> int:

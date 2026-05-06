@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 from .auth import DEFAULT_HEADERS, cookies_to_string
 from .log import logger
-from .models import Gallery, ImagePage
+from .models import Gallery, ImagePage, SearchPage
 
 API_BASE = "https://api.e-hentai.org/api.php"
 E_HENTAI_BASE = "https://e-hentai.org"
@@ -46,18 +46,20 @@ async def search_galleries(
     keyword: str,
     page: int = 0,
     site_mode: str = "exhentai",
-) -> list[Gallery]:
+) -> SearchPage:
     headers = _build_session_headers(cookies)
     payload = {
         "method": "gdata",
         "gidlist": [],
     }
     galleries = []
+    total_count = None
     target_index = _normalize_search_page_index(page)
     try:
         html = await _fetch_search_page(session, headers, keyword, target_index, site_mode)
         if not html:
-            return []
+            return SearchPage(galleries=[], total_count=0, page=_format_search_page_number(page))
+        total_count = _parse_search_total_count(html)
         results = _parse_search_results(html, site_mode)
         if results:
             gids = [[r["gid"], r["token"]] for r in results]
@@ -78,7 +80,11 @@ async def search_galleries(
                         galleries.append(gallery)
     except Exception as e:
         logger.error(f"Search failed: {e}")
-    return galleries
+    return SearchPage(
+        galleries=galleries,
+        total_count=total_count,
+        page=_format_search_page_number(page),
+    )
 
 
 async def _fetch_search_page(
@@ -130,6 +136,16 @@ def _normalize_search_page_index(page: int) -> int:
     return page_number - 1
 
 
+def _format_search_page_number(page: int) -> int:
+    try:
+        page_number = int(page)
+    except (TypeError, ValueError):
+        return 1
+    if page_number <= 1:
+        return 1
+    return page_number
+
+
 def _build_search_url(keyword: str, page: int = 0, site_mode: str = "exhentai") -> str:
     base = "https://exhentai.org/" if site_mode == "exhentai" else "https://e-hentai.org/"
     params = {
@@ -165,6 +181,29 @@ def _find_search_next_page_url(soup: BeautifulSoup, base: str) -> str | None:
             fallback = href
     if fallback:
         return urljoin(base, fallback)
+    return None
+
+
+def _parse_search_total_count(html: str) -> int | None:
+    soup = BeautifulSoup(html, "lxml")
+    candidates = []
+    for selector in (".searchtext", "p"):
+        for node in soup.select(selector):
+            text = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+            if text:
+                candidates.append(text)
+
+    candidates.append(re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip())
+    patterns = (
+        r"\bFound\s+([\d,]+)\s+results?\b",
+        r"\b([\d,]+)\s+results?\s+found\b",
+        r"\bShowing\s+[\d,]+\s*-\s*[\d,]+\s+of\s+([\d,]+)\b",
+    )
+    for text in candidates:
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return int(match.group(1).replace(",", ""))
     return None
 
 
