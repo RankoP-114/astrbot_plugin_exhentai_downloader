@@ -98,7 +98,7 @@ requests>=2.31
 | `auto_cleanup` | 发送后删除本地临时文件和打包文件 | `true` |
 | `auto_revoke` | 发送后自动撤回文件消息，仅 OneBot v11 / aiocqhttp | `false` |
 | `cover_preview` | 下载或查看详情前发送封面预览 | `true` |
-| `search_result_covers` | 搜索结果列表附带封面；QQ / OneBot 合并转发中显示为图片，其他平台显示封面链接 | `false` |
+| `search_result_covers` | 搜索结果列表附带封面；QQ / OneBot 会先缓存封面再在合并转发中显示图片，其他平台显示封面链接 | `false` |
 | `debug_mode` | 输出调试日志；日志会写入 AstrBot 日志系统 | `false` |
 
 ## 认证
@@ -149,7 +149,8 @@ ipb_member_id=123456; ipb_pass_hash=abcdef123456; igneous=mysterystring
 - 图片页 URL 会作为下载 Referer，降低直链下载被拒绝的概率。
 - 下载到本地的旧文件会先校验文件头；无效文件会删除后重新下载。
 - 下载响应如果是 HTML、文本或 JSON，会被视为失败，不会写入图片文件。
-- QQ / OneBot v11 平台的搜索结果会用合并转发消息发送，每个条目一个转发节点；开启 `search_result_covers` 后每个条目会附带封面。
+- QQ / OneBot v11 平台的搜索结果会用合并转发消息发送，每个条目一个转发节点；开启 `search_result_covers` 后会先把封面缓存到本地，再作为本地图片发送，避免缩略图外链过期。
+- QQ / OneBot v11 平台的详情和下载前封面预览也会使用本地缓存图片发送。
 - ZIP 设置密码时会使用 AES 加密；如果加密依赖缺失或加密失败，不会回退发送未加密 ZIP。
 - PDF 设置密码时会使用 `pypdf` 加密；如果加密依赖缺失或加密失败，不会回退发送未加密 PDF。
 - 打包密码不会在聊天完成提示里回显，请在 WebUI 配置中查看或提前告知接收者。

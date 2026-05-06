@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import re
 import shutil
 import time
 from collections import deque
 from pathlib import Path
+from urllib.parse import urlparse
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
@@ -307,11 +309,76 @@ class ExHentaiPlugin(Star):
         os.makedirs(p, exist_ok=True)
         return p
 
+    def _get_cover_cache_dir(self) -> str:
+        p = os.path.join(self._get_data_dir(), "cover_cache")
+        os.makedirs(p, exist_ok=True)
+        return p
+
     def _cleanup_temp_dir(self, gid: int):
         temp_dir = os.path.join(self._get_data_dir(), "temp", str(gid))
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
             self._debug_log(f"Cleaned up temp dir: {temp_dir}")
+
+    async def _cache_gallery_covers(self, session, galleries) -> dict[int, str]:
+        tasks = [self._cache_gallery_cover(session, gallery) for gallery in galleries]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        cover_paths = {}
+        for gallery, result in zip(galleries, results):
+            if isinstance(result, Exception):
+                self._debug_log(f"Cover cache failed for {gallery.gid}: {result}")
+                continue
+            if isinstance(result, str) and result:
+                cover_paths[gallery.gid] = result
+        return cover_paths
+
+    async def _cache_gallery_cover(self, session, gallery) -> str:
+        thumb_url = str(getattr(gallery, "thumb_url", "") or "").strip()
+        if not thumb_url:
+            return ""
+
+        cache_dir = self._get_cover_cache_dir()
+        key = hashlib.sha1(thumb_url.encode("utf-8")).hexdigest()[:12]
+        file_stem = f"{gallery.gid}_{key}"
+        for ext in _COVER_EXTENSIONS:
+            cached_path = os.path.join(cache_dir, f"{file_stem}{ext}")
+            if _is_valid_cover_file(cached_path):
+                return cached_path
+
+        headers = {
+            "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Encoding": "identity",
+            "Referer": getattr(gallery, "gallery_url", "") or "https://e-hentai.org/",
+        }
+        try:
+            async with session.get(thumb_url, headers=headers, timeout=20) as resp:
+                if resp.status != 200:
+                    self._debug_log(f"Cover fetch returned {resp.status}: {thumb_url}")
+                    return ""
+                content_type = resp.headers.get("Content-Type", "")
+                body = await resp.read()
+        except Exception as e:
+            self._debug_log(f"Cover fetch failed: {e}")
+            return ""
+
+        if len(body) > 5 * 1024 * 1024:
+            self._debug_log(f"Cover too large: {len(body)} bytes")
+            return ""
+        if not _is_cover_image(body, content_type):
+            self._debug_log(
+                f"Cover rejected: content_type={content_type or 'unknown'}, size={len(body)}"
+            )
+            return ""
+
+        ext = _guess_cover_extension(thumb_url, content_type, body)
+        cover_path = os.path.join(cache_dir, f"{file_stem}{ext}")
+        try:
+            with open(cover_path, "wb") as f:
+                f.write(body)
+        except OSError as e:
+            self._debug_log(f"Cover cache write failed: {e}")
+            return ""
+        return cover_path
 
     async def _build_client_session(self) -> "aiohttp.ClientSession":
         import aiohttp
@@ -508,12 +575,16 @@ class ExHentaiPlugin(Star):
 
             include_search_covers = self._get_bool_config("search_result_covers", False)
             if _is_qq_platform(event):
+                cover_paths = {}
+                if include_search_covers:
+                    cover_paths = await self._cache_gallery_covers(session, galleries[:10])
                 yield event.chain_result([
                     _build_search_forward_nodes(
                         event,
                         keyword,
                         galleries,
                         include_covers=include_search_covers,
+                        cover_paths=cover_paths,
                     )
                 ])
                 return
@@ -566,12 +637,16 @@ class ExHentaiPlugin(Star):
                 return
 
             if _is_qq_platform(event):
+                cover_path = ""
+                if self.config.get("cover_preview", True):
+                    cover_path = await self._cache_gallery_cover(session, gallery)
                 yield event.chain_result([
                     _build_gallery_info_forward_nodes(
                         event,
                         gallery,
                         f"使用 /exhentai download {gallery.gid}/{gallery.token} 下载",
                         include_cover=self.config.get("cover_preview", True),
+                        cover_path=cover_path,
                     )
                 ])
                 return
@@ -658,12 +733,16 @@ class ExHentaiPlugin(Star):
                 return
 
             if _is_qq_platform(event):
+                cover_path = ""
+                if self.config.get("cover_preview", True):
+                    cover_path = await self._cache_gallery_cover(session, gallery)
                 yield event.chain_result([
                     _build_gallery_info_forward_nodes(
                         event,
                         gallery,
                         "正在获取图片列表...",
                         include_cover=self.config.get("cover_preview", True),
+                        cover_path=cover_path,
                     )
                 ])
             else:
@@ -847,21 +926,85 @@ def _get_forward_bot_id(event: AstrMessageEvent) -> str:
         return "0"
 
 
+_COVER_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+
+
+def _has_cover_magic(data: bytes) -> bool:
+    if data.startswith(b"\xff\xd8\xff"):
+        return True
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return True
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return True
+    if data.startswith(b"BM"):
+        return True
+    return False
+
+
+def _is_cover_image(data: bytes, content_type: str = "") -> bool:
+    if not data:
+        return False
+    media_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if media_type in {"text/html", "text/plain", "application/json"}:
+        return False
+    return _has_cover_magic(data)
+
+
+def _guess_cover_extension(url: str, content_type: str, data: bytes) -> str:
+    path = urlparse(url).path
+    if "." in path.rsplit("/", 1)[-1]:
+        ext = "." + path.rsplit(".", 1)[-1].lower()
+        if ext in _COVER_EXTENSIONS:
+            return ext
+
+    media_type = (content_type or "").split(";", 1)[0].strip().lower()
+    by_type = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "image/bmp": ".bmp",
+    }
+    if media_type in by_type:
+        return by_type[media_type]
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return ".webp"
+    if data.startswith(b"BM"):
+        return ".bmp"
+    return ".jpg"
+
+
+def _is_valid_cover_file(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            sample = f.read(32)
+    except OSError:
+        return False
+    return _is_cover_image(sample)
+
+
 def _build_gallery_info_forward_nodes(
     event: AstrMessageEvent,
     gallery,
     footer: str = "",
     include_cover: bool = True,
+    cover_path: str = "",
 ) -> Nodes:
     bot_id = _get_forward_bot_id(event)
     nodes = []
-    if include_cover and gallery.thumb_url:
+    if include_cover and cover_path:
         try:
             nodes.append(
                 Node(
                     uin=bot_id,
                     name="封面",
-                    content=[Image.fromURL(gallery.thumb_url)],
+                    content=[Image.fromFileSystem(cover_path)],
                 )
             )
         except Exception:
@@ -885,8 +1028,10 @@ def _build_search_forward_nodes(
     keyword: str,
     galleries,
     include_covers: bool = False,
+    cover_paths: dict[int, str] | None = None,
 ) -> Nodes:
     bot_id = _get_forward_bot_id(event)
+    cover_paths = cover_paths or {}
 
     nodes = [
         Node(
@@ -897,9 +1042,10 @@ def _build_search_forward_nodes(
     ]
     for index, gallery in enumerate(galleries[:10], 1):
         content = []
-        if include_covers and gallery.thumb_url:
+        cover_path = cover_paths.get(gallery.gid, "")
+        if include_covers and cover_path:
             try:
-                content.append(Image.fromURL(gallery.thumb_url))
+                content.append(Image.fromFileSystem(cover_path))
             except Exception:
                 pass
         content.append(
