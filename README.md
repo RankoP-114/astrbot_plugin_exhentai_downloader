@@ -6,7 +6,7 @@ AstrBot 插件：在聊天中搜索 ExHentai / E-Hentai 画廊，查看详情，
 
 ## 功能
 
-- 搜索画廊：支持 ExHentai / E-Hentai 关键词搜索。
+- 搜索画廊：支持 ExHentai / E-Hentai 关键词搜索，并按站点游标链接翻页。
 - 查看详情：展示标题、分类、页数、大小、评分、标签、封面等信息。
 - 下载画廊：按图片页 Referer 下载，支持并发、重试、超时和进度提示。
 - 安全打包：支持 ZIP / PDF；设置密码后两种格式都会加密。
@@ -129,7 +129,7 @@ ipb_member_id=123456; ipb_pass_hash=abcdef123456; igneous=mysterystring
 /exhentai login <用户名> <密码>       私聊登录并保存 Cookie
 /exhentai logout                    清除已保存 Cookie
 /exhentai status                    查看站点、登录、打包、权限等状态
-/exhentai search <关键词> [页码]     搜索画廊
+/exhentai search <关键词> [页码]     搜索画廊；页码从 1 开始
 /exhentai info <gid/token或URL>      查看画廊详情
 /exhentai download <gid/token或URL>  下载并打包画廊
 ```
@@ -137,7 +137,8 @@ ipb_member_id=123456; ipb_pass_hash=abcdef123456; igneous=mysterystring
 示例：
 
 ```text
-/exhentai search artist:name 0
+/exhentai search artist:name 1
+/exhentai search [CunnyFunky] page=2
 /exhentai info 123456/abcdef1234
 /exhentai download https://exhentai.org/g/123456/abcdef1234/
 ```
@@ -152,6 +153,7 @@ ipb_member_id=123456; ipb_pass_hash=abcdef123456; igneous=mysterystring
 - 下载到本地的旧文件会先校验文件头；无效文件会删除后重新下载。
 - 下载响应如果是 HTML、文本或 JSON，会被视为失败，不会写入图片文件。
 - QQ / OneBot v11 平台的搜索结果会用合并转发消息发送，每个条目一个转发节点；开启 `search_result_covers` 后会先把封面缓存到本地，再作为本地图片发送，避免缩略图外链过期。
+- 搜索页码按聊天习惯从 `1` 开始；不写页码、写 `0` 或写 `1` 都是第一页，写 `2` 表示第二页。
 - QQ / OneBot v11 平台的详情和下载前封面预览也会使用本地缓存图片发送。
 - 如果 QQ / OneBot 拒绝带图合并转发，插件会自动重发不带图的文本转发包。
 - ZIP 设置密码时会使用 AES 加密；如果加密依赖缺失或加密失败，不会回退发送未加密 ZIP。

@@ -1,6 +1,6 @@
 name: astrbot_plugin_exhentai_downloader
 desc: ExHentai/E-Hentai 漫画搜索、下载、打包、加密插件
-version: 1.3.4
+version: 1.3.5
 author: RankoP-114
 repo: https://github.com/RankoP-114/astrbot_plugin_exhentai_downloader
 license: AGPL-3.0-only

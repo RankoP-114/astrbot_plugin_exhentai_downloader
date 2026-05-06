@@ -613,14 +613,15 @@ class ExHentaiPlugin(Star):
             return
 
         keyword, page = _parse_search_args(_get_command_tail(event, "exhentai", "search"))
+        display_page = _format_search_page_number(page)
         if not keyword:
             yield event.plain_result(
                 "用法：/exhentai search <关键词> [页码]\n"
-                "示例：/exhentai search mind control 1"
+                "示例：/exhentai search mind control 2"
             )
             return
 
-        yield event.plain_result(f"正在搜索: {keyword} ...")
+        yield event.plain_result(f"正在搜索: {keyword} (第 {display_page} 页) ...")
         session = await self._build_client_session()
         try:
             galleries = await search_galleries(
@@ -628,7 +629,7 @@ class ExHentaiPlugin(Star):
                 self.config.get("site_mode", "exhentai"),
             )
             if not galleries:
-                yield event.plain_result(f"未找到与 '{keyword}' 相关的结果。")
+                yield event.plain_result(f"未找到与 '{keyword}' 相关的第 {display_page} 页结果。")
                 return
 
             include_search_covers = self._get_bool_config("search_result_covers", False)
@@ -640,6 +641,7 @@ class ExHentaiPlugin(Star):
                     event,
                     keyword,
                     galleries,
+                    page=display_page,
                     include_covers=include_search_covers,
                     cover_paths=cover_paths,
                 )
@@ -649,13 +651,14 @@ class ExHentaiPlugin(Star):
                         event,
                         keyword,
                         galleries,
+                        page=display_page,
                         include_covers=False,
                     )
                 sent = await self._send_forward_with_fallback(
                     event,
                     nodes,
                     fallback_nodes=fallback_nodes,
-                    fallback_text=_format_search_results_text(keyword, galleries),
+                    fallback_text=_format_search_results_text(keyword, galleries, page=display_page),
                 )
                 if not sent:
                     yield event.plain_result("搜索完成，但发送结果失败。")
@@ -665,6 +668,7 @@ class ExHentaiPlugin(Star):
                 _format_search_results_text(
                     keyword,
                     galleries,
+                    page=display_page,
                     include_covers=include_search_covers,
                 )
             )
@@ -1123,6 +1127,7 @@ def _build_search_forward_nodes(
     event: AstrMessageEvent,
     keyword: str,
     galleries,
+    page: int = 1,
     include_covers: bool = False,
     cover_paths: dict[int, str] | None = None,
 ) -> Nodes:
@@ -1133,7 +1138,7 @@ def _build_search_forward_nodes(
         Node(
             uin=bot_id,
             name="ExHentai 搜索",
-            content=[Plain(f"搜索 '{keyword}' 结果，共 {len(galleries)} 个。")],
+            content=[Plain(f"搜索 '{keyword}' 第 {page} 页结果，共 {len(galleries)} 个。")],
         )
     ]
     for index, gallery in enumerate(galleries[:10], 1):
@@ -1178,9 +1183,10 @@ def _build_search_forward_nodes(
 def _format_search_results_text(
     keyword: str,
     galleries,
+    page: int = 1,
     include_covers: bool = False,
 ) -> str:
-    lines = [f"搜索 '{keyword}' 结果 ({len(galleries)} 个):", ""]
+    lines = [f"搜索 '{keyword}' 第 {page} 页结果 ({len(galleries)} 个):", ""]
     for i, g in enumerate(galleries[:10], 1):
         line = (
             f"{i}. [{g.gid}/{g.token}] {g.title} "
@@ -1233,3 +1239,13 @@ def _parse_search_args(raw_text: str) -> tuple[str, int]:
             page = max(0, int(parts[1]))
 
     return keyword_part.strip(), page
+
+
+def _format_search_page_number(page: int) -> int:
+    try:
+        page_number = int(page)
+    except (TypeError, ValueError):
+        return 1
+    if page_number <= 1:
+        return 1
+    return page_number

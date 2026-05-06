@@ -53,34 +53,81 @@ async def search_galleries(
         "gidlist": [],
     }
     galleries = []
+    target_index = _normalize_search_page_index(page)
     try:
-        search_url = _build_search_url(keyword, page, site_mode)
-        async with session.get(search_url, headers=headers, timeout=30) as resp:
-            if resp.status != 200:
-                logger.error(f"Search returned status {resp.status}")
-                return []
-            html = await resp.text()
-            results = _parse_search_results(html, site_mode)
-            if results:
-                gids = [[r["gid"], r["token"]] for r in results]
-                payload["gidlist"] = gids
-                payload["method"] = "gdata"
-                async with session.post(
-                    API_BASE, json=payload, headers=headers, timeout=30
-                ) as api_resp:
-                    if api_resp.status == 200:
-                        data = await api_resp.json(content_type=None)
-                        gmetadatas = data.get("gmetadata", [])
-                        for i, meta in enumerate(gmetadatas):
-                            gallery = _parse_gallery_meta(meta)
-                            if i < len(results):
-                                result_thumb = results[i].get("thumb_url", "")
-                                if _is_remote_url(result_thumb):
-                                    gallery.thumb_url = result_thumb
-                            galleries.append(gallery)
+        html = await _fetch_search_page(session, headers, keyword, target_index, site_mode)
+        if not html:
+            return []
+        results = _parse_search_results(html, site_mode)
+        if results:
+            gids = [[r["gid"], r["token"]] for r in results]
+            payload["gidlist"] = gids
+            payload["method"] = "gdata"
+            async with session.post(
+                API_BASE, json=payload, headers=headers, timeout=30
+            ) as api_resp:
+                if api_resp.status == 200:
+                    data = await api_resp.json(content_type=None)
+                    gmetadatas = data.get("gmetadata", [])
+                    for i, meta in enumerate(gmetadatas):
+                        gallery = _parse_gallery_meta(meta)
+                        if i < len(results):
+                            result_thumb = results[i].get("thumb_url", "")
+                            if _is_remote_url(result_thumb):
+                                gallery.thumb_url = result_thumb
+                        galleries.append(gallery)
     except Exception as e:
         logger.error(f"Search failed: {e}")
     return galleries
+
+
+async def _fetch_search_page(
+    session: aiohttp.ClientSession,
+    headers: dict[str, str],
+    keyword: str,
+    target_index: int,
+    site_mode: str = "exhentai",
+) -> str:
+    base = "https://exhentai.org/" if site_mode == "exhentai" else "https://e-hentai.org/"
+    current_url = _build_search_url(keyword, 0, site_mode)
+    visited = set()
+    html = ""
+
+    for current_index in range(target_index + 1):
+        if current_url in visited:
+            logger.warning(f"Stopped search pagination on repeated URL: {current_url}")
+            return ""
+        visited.add(current_url)
+
+        async with session.get(current_url, headers=headers, timeout=30) as resp:
+            if resp.status != 200:
+                logger.error(f"Search returned status {resp.status}")
+                return ""
+            html = await resp.text()
+
+        if current_index >= target_index:
+            return html
+
+        soup = BeautifulSoup(html, "lxml")
+        next_url = _find_search_next_page_url(soup, base)
+        if not next_url:
+            logger.info(
+                f"Search page {current_index + 1} has no next page for keyword: {keyword}"
+            )
+            return ""
+        current_url = next_url
+
+    return html
+
+
+def _normalize_search_page_index(page: int) -> int:
+    try:
+        page_number = int(page)
+    except (TypeError, ValueError):
+        page_number = 0
+    if page_number <= 1:
+        return 0
+    return page_number - 1
 
 
 def _build_search_url(keyword: str, page: int = 0, site_mode: str = "exhentai") -> str:
@@ -102,6 +149,23 @@ def _urlencode(params: dict) -> str:
         else:
             parts.append(f"{k}={v}")
     return "&".join(parts)
+
+
+def _find_search_next_page_url(soup: BeautifulSoup, base: str) -> str | None:
+    text_next_markers = {"next >", "next", ">", "›", "»"}
+    fallback = ""
+    for link in soup.find_all("a", href=True):
+        href = link.get("href", "")
+        if not href:
+            continue
+        text = re.sub(r"\s+", " ", link.get_text(" ", strip=True)).strip().lower()
+        if "next=" in href:
+            return urljoin(base, href)
+        if text in text_next_markers or text.startswith("next "):
+            fallback = href
+    if fallback:
+        return urljoin(base, fallback)
+    return None
 
 
 def _parse_search_results(html: str, site_mode: str = "exhentai") -> list[dict]:
