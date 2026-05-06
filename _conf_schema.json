@@ -97,6 +97,14 @@
     "min": 0,
     "max": 5
   },
+  "max_download_size_mb": {
+    "description": "下载体积上限 (MB)",
+    "type": "int",
+    "hint": "按画廊 metadata 的文件大小在下载前拦截，默认 100MB；0 表示不限制",
+    "default": 100,
+    "min": 0,
+    "max": 10240
+  },
   "pack_format": {
     "description": "打包格式",
     "type": "string",

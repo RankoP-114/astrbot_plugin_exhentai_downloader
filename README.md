@@ -89,6 +89,7 @@ requests>=2.31
 | `timeout` | 单页下载超时秒数，运行时限制为 `5-300` | `30` |
 | `download_queue_enabled` | 启用下载排队；全局最多同时运行 1 个下载任务 | `true` |
 | `max_download_queue_size` | 最大等待队列数，运行时限制为 `0-5` | `5` |
+| `max_download_size_mb` | 下载体积上限；按画廊 metadata 的文件大小在下载前拦截，`0` 表示不限制 | `100` |
 | `pack_format` | 打包格式：`zip` 或 `pdf` | `zip` |
 | `pack_password` | ZIP / PDF 加密密码；留空则不加密 | 空 |
 | `admin_only` | 仅 AstrBot 管理员可使用指令 | `true` |
@@ -144,6 +145,7 @@ ipb_member_id=123456; ipb_pass_hash=abcdef123456; igneous=mysterystring
 ## 下载和打包行为
 
 - 下载前会校验登录状态；缓存 Cookie 也会按当前站点复验。
+- 下载前会按 `max_download_size_mb` 检查画廊体积；默认超过 `100 MB` 会取消下载。
 - 下载任务全局排队执行，最多同时运行 1 个下载任务；默认最多允许 5 个任务等待。
 - 同一个画廊同时只会启动一个下载任务，重复请求会提示正在下载。
 - 图片页 URL 会作为下载 Referer，降低直链下载被拒绝的概率。

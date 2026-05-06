@@ -48,6 +48,8 @@ ADMIN_DENY = "仅 AstrBot 管理员可使用此功能。"
 PRIVATE_ADMIN_DENY = "私聊仅 AstrBot 管理员可使用此功能。"
 BLACKLIST_DENY = "该用户在黑名单中，无法使用此功能。"
 MAX_ACTIVE_DOWNLOADS = 1
+DEFAULT_MAX_DOWNLOAD_SIZE_MB = 100
+MAX_DOWNLOAD_SIZE_MB = 10240
 
 
 class ExHentaiPlugin(Star):
@@ -105,6 +107,20 @@ class ExHentaiPlugin(Star):
         if not self._get_bool_config("download_queue_enabled", True):
             return 0
         return self._get_int_config("max_download_queue_size", 5, 0, 5)
+
+    def _get_max_download_size_mb(self) -> int:
+        return self._get_int_config(
+            "max_download_size_mb",
+            DEFAULT_MAX_DOWNLOAD_SIZE_MB,
+            0,
+            MAX_DOWNLOAD_SIZE_MB,
+        )
+
+    def _is_gallery_over_size_limit(self, gallery) -> tuple[bool, int]:
+        limit_mb = self._get_max_download_size_mb()
+        if limit_mb <= 0 or not getattr(gallery, "filesize", 0):
+            return False, limit_mb
+        return gallery.filesize > limit_mb * 1024 * 1024, limit_mb
 
     async def _reserve_download_slot(self) -> tuple[bool, object | None, str]:
         token = object()
@@ -525,6 +541,10 @@ class ExHentaiPlugin(Star):
         site = self.config.get("site_mode", "exhentai")
         active_downloads, queued_downloads = await self._get_download_queue_snapshot()
         queue_limit = self._get_download_queue_limit()
+        max_download_size_mb = self._get_max_download_size_mb()
+        max_download_size_text = (
+            f"{max_download_size_mb} MB" if max_download_size_mb > 0 else "不限制"
+        )
 
         lines = [
             f"站点: {site}",
@@ -533,6 +553,7 @@ class ExHentaiPlugin(Star):
             f"打包格式: {pack_fmt}",
             f"加密密码: {'已设置' if pass_set else '未设置'}",
             f"并发数: {self._get_int_config('download_concurrency', 3, 1, 10)}",
+            f"下载体积上限: {max_download_size_text}",
             f"下载队列: {'开' if queue_limit > 0 else '关'} "
             f"(运行中 {active_downloads}/{MAX_ACTIVE_DOWNLOADS}, "
             f"等待 {queued_downloads}/{queue_limit})",
@@ -733,6 +754,14 @@ class ExHentaiPlugin(Star):
             gallery = await get_gallery_metadata(session, cookies, gid, token)
             if not gallery:
                 yield event.plain_result(f"无法获取 #{gid} 的信息。")
+                return
+
+            over_limit, limit_mb = self._is_gallery_over_size_limit(gallery)
+            if over_limit:
+                yield event.plain_result(
+                    f"下载已取消：画廊大小 {gallery.filesize_mb} MB，"
+                    f"超过当前下载体积上限 {limit_mb} MB。"
+                )
                 return
 
             if _is_qq_platform(event):
