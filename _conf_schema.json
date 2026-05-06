@@ -1,0 +1,148 @@
+{
+  "auth_method": {
+    "description": "认证方式",
+    "type": "string",
+    "hint": "选择使用账号密码登录还是手动导入 Cookie",
+    "default": "cookie",
+    "options": ["cookie", "credential"]
+  },
+  "exhentai_cookies": {
+    "description": "ExHentai Cookies",
+    "type": "text",
+    "hint": "手动粘贴 ExHentai cookie 字符串 (ipb_member_id + ipb_pass_hash + igneous 必须)",
+    "default": ""
+  },
+  "username": {
+    "description": "ExHentai 用户名",
+    "type": "string",
+    "hint": "用于自动登录 (需要 Hasuki Exchange 权限才能访问 exhentai.org)",
+    "default": ""
+  },
+  "password": {
+    "description": "ExHentai 密码",
+    "type": "string",
+    "hint": "用于自动登录",
+    "default": "",
+    "invisible": true
+  },
+  "proxy_type": {
+    "description": "代理类型",
+    "type": "string",
+    "options": ["none", "http", "socks5"],
+    "default": "none"
+  },
+  "proxy_host": {
+    "description": "代理主机",
+    "type": "string",
+    "hint": "例如 127.0.0.1",
+    "default": ""
+  },
+  "proxy_port": {
+    "description": "代理端口",
+    "type": "int",
+    "hint": "例如 7890",
+    "default": 0
+  },
+  "proxy_username": {
+    "description": "代理用户名 (可选)",
+    "type": "string",
+    "default": ""
+  },
+  "proxy_password": {
+    "description": "代理密码 (可选)",
+    "type": "string",
+    "default": "",
+    "invisible": true
+  },
+  "site_mode": {
+    "description": "站点模式",
+    "type": "string",
+    "options": ["exhentai", "ehentai"],
+    "default": "exhentai",
+    "hint": "exhentai 需要已登录的 cookie 或通过 Hasuki Exchange 的账号"
+  },
+  "download_concurrency": {
+    "description": "并发下载数",
+    "type": "int",
+    "hint": "同时下载的图片数量，建议 3-5",
+    "default": 3,
+    "min": 1,
+    "max": 10
+  },
+  "retry_count": {
+    "description": "下载重试次数",
+    "type": "int",
+    "default": 3,
+    "min": 1,
+    "max": 10
+  },
+  "timeout": {
+    "description": "请求超时 (秒)",
+    "type": "int",
+    "default": 30,
+    "min": 5,
+    "max": 300
+  },
+  "download_queue_enabled": {
+    "description": "启用下载排队",
+    "type": "bool",
+    "hint": "开启后同一时间只运行 1 个下载任务，其余任务进入等待队列",
+    "default": true
+  },
+  "max_download_queue_size": {
+    "description": "最大下载排队数",
+    "type": "int",
+    "hint": "等待队列上限，运行时限制为 0-5；0 表示不允许等待",
+    "default": 5,
+    "min": 0,
+    "max": 5
+  },
+  "pack_format": {
+    "description": "打包格式",
+    "type": "string",
+    "options": ["zip", "pdf"],
+    "default": "zip"
+  },
+  "pack_password": {
+    "description": "打包密码 (可选)",
+    "type": "string",
+    "hint": "留空则不加密，ZIP/PDF 格式均可使用",
+    "default": ""
+  },
+  "admin_only": {
+    "description": "仅管理员可用",
+    "type": "bool",
+    "hint": "开启后只有 AstrBot 管理员可以使用指令",
+    "default": true
+  },
+  "group_whitelist": {
+    "description": "群组白名单",
+    "type": "list",
+    "hint": "群号列表，为空则不限制；私聊不受此限制",
+    "default": []
+  },
+  "auto_cleanup": {
+    "description": "自动清理",
+    "type": "bool",
+    "hint": "发送文件后自动删除本地临时文件",
+    "default": true
+  },
+  "auto_revoke": {
+    "description": "自动撤回",
+    "type": "bool",
+    "hint": "发送文件后自动撤回消息 (仅 OneBot v11 平台有效)",
+    "default": false
+  },
+  "cover_preview": {
+    "description": "封面预览",
+    "type": "bool",
+    "hint": "下载前展示封面图和详情信息",
+    "default": true
+  },
+  "debug_mode": {
+    "description": "调试模式",
+    "type": "bool",
+    "hint": "输出详细日志便于排错",
+    "default": false
+  }
+}
