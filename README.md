@@ -19,7 +19,20 @@ AstrBot 插件：在聊天中搜索 ExHentai / E-Hentai 画廊，查看详情，
 
 ## 安装
 
-### 普通安装
+### WebUI 页面安装
+
+1. 打开 AstrBot WebUI。
+2. 进入插件管理页面，选择安装插件或从链接安装。
+3. 填入仓库地址：
+
+```text
+https://github.com/RankoP-114/astrbot_plugin_exhentai_downloader
+```
+
+4. 安装完成后，在插件配置页填写 Cookie / 账号、代理、打包格式等配置。
+5. 如果 AstrBot 没有自动安装依赖，请在 AstrBot 运行环境中手动执行 `pip install -r requirements.txt`，然后重载插件或重启 AstrBot。
+
+### 手动安装
 
 ```bash
 cd AstrBot/data/plugins
