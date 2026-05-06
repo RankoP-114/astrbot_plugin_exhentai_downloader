@@ -43,6 +43,7 @@ AUTH_HELP = (
 
 WHITELIST_DENY = "该群不在白名单中，无法使用此功能。"
 ADMIN_DENY = "仅 AstrBot 管理员可使用此功能。"
+PRIVATE_ADMIN_DENY = "私聊仅 AstrBot 管理员可使用此功能。"
 BLACKLIST_DENY = "该用户在黑名单中，无法使用此功能。"
 MAX_ACTIVE_DOWNLOADS = 1
 
@@ -275,6 +276,12 @@ class ExHentaiPlugin(Star):
             return BLACKLIST_DENY
         if self.config.get("admin_only", True) and not self._is_admin(event):
             return ADMIN_DENY
+        if (
+            self._get_bool_config("private_admin_only", False)
+            and not self._is_group_message(event)
+            and not self._is_admin(event)
+        ):
+            return PRIVATE_ADMIN_DENY
         if not self._check_group_access(event):
             return WHITELIST_DENY
         return None
@@ -460,6 +467,7 @@ class ExHentaiPlugin(Star):
             f"(运行中 {active_downloads}/{MAX_ACTIVE_DOWNLOADS}, "
             f"等待 {queued_downloads}/{queue_limit})",
             f"用户黑名单: {len(self._normalize_id_list(self.config.get('user_blacklist', [])))} 人",
+            f"私聊管理员限定: {'开' if self._get_bool_config('private_admin_only', False) else '关'}",
             f"自动清理: {'开' if self.config.get('auto_cleanup', True) else '关'}",
             f"自动撤回: {'开' if self.config.get('auto_revoke', False) else '关'}",
             f"封面预览: {'开' if self.config.get('cover_preview', True) else '关'}",

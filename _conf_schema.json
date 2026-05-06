@@ -115,6 +115,12 @@
     "hint": "开启后只有 AstrBot 管理员可以使用指令",
     "default": true
   },
+  "private_admin_only": {
+    "description": "私聊仅管理员可用",
+    "type": "bool",
+    "hint": "开启后私聊命令只有 AstrBot 管理员可以使用；即使关闭全局 admin_only 也会生效",
+    "default": false
+  },
   "group_whitelist": {
     "description": "群组白名单",
     "type": "list",
