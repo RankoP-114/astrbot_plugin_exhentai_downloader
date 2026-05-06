@@ -43,6 +43,7 @@ AUTH_HELP = (
 
 WHITELIST_DENY = "该群不在白名单中，无法使用此功能。"
 ADMIN_DENY = "仅 AstrBot 管理员可使用此功能。"
+BLACKLIST_DENY = "该用户在黑名单中，无法使用此功能。"
 MAX_ACTIVE_DOWNLOADS = 1
 
 
@@ -235,7 +236,43 @@ class ExHentaiPlugin(Star):
         except Exception:
             return bool(getattr(getattr(event, "message_obj", None), "group_id", ""))
 
+    @staticmethod
+    def _get_sender_id(event: AstrMessageEvent) -> str:
+        try:
+            return str(event.get_sender_id() or "").strip()
+        except Exception:
+            pass
+
+        message_obj = getattr(event, "message_obj", None)
+        candidates = [
+            getattr(message_obj, "sender_id", None),
+            getattr(message_obj, "user_id", None),
+        ]
+        sender = getattr(message_obj, "sender", None)
+        if isinstance(sender, dict):
+            candidates.extend([sender.get("user_id"), sender.get("id")])
+        else:
+            candidates.extend([
+                getattr(sender, "user_id", None),
+                getattr(sender, "id", None),
+            ])
+
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _is_blacklisted(self, event: AstrMessageEvent) -> bool:
+        sender_id = self._get_sender_id(event)
+        if not sender_id:
+            return False
+        blacklist = self._normalize_id_list(self.config.get("user_blacklist", []))
+        return sender_id in blacklist
+
     def _check_access(self, event: AstrMessageEvent) -> str | None:
+        if self._is_blacklisted(event):
+            return BLACKLIST_DENY
         if self.config.get("admin_only", True) and not self._is_admin(event):
             return ADMIN_DENY
         if not self._check_group_access(event):
@@ -422,6 +459,7 @@ class ExHentaiPlugin(Star):
             f"下载队列: {'开' if queue_limit > 0 else '关'} "
             f"(运行中 {active_downloads}/{MAX_ACTIVE_DOWNLOADS}, "
             f"等待 {queued_downloads}/{queue_limit})",
+            f"用户黑名单: {len(self._normalize_id_list(self.config.get('user_blacklist', [])))} 人",
             f"自动清理: {'开' if self.config.get('auto_cleanup', True) else '关'}",
             f"自动撤回: {'开' if self.config.get('auto_revoke', False) else '关'}",
             f"封面预览: {'开' if self.config.get('cover_preview', True) else '关'}",

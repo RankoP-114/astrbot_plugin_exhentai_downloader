@@ -93,6 +93,7 @@ requests>=2.31
 | `pack_password` | ZIP / PDF 加密密码；留空则不加密 | 空 |
 | `admin_only` | 仅 AstrBot 管理员可使用指令 | `true` |
 | `group_whitelist` | 允许使用的群号列表；为空则不限制，私聊不受限制 | `[]` |
+| `user_blacklist` | 用户 ID 黑名单；命中后无法触发任何插件命令，管理员也会被拦截 | `[]` |
 | `auto_cleanup` | 发送后删除本地临时文件和打包文件 | `true` |
 | `auto_revoke` | 发送后自动撤回文件消息，仅 OneBot v11 / aiocqhttp | `false` |
 | `cover_preview` | 下载或查看详情前发送封面预览 | `true` |
@@ -157,6 +158,7 @@ ipb_member_id=123456; ipb_pass_hash=abcdef123456; igneous=mysterystring
 
 - `admin_only` 默认为开启，非 AstrBot 管理员无法使用任何插件命令。
 - `group_whitelist` 只限制群聊；私聊不受白名单限制。
+- `user_blacklist` 会拦截指定用户 ID 的所有插件命令，优先级高于管理员权限。
 - `auto_revoke` 目前只对 `aiocqhttp` / OneBot v11 平台执行。
 - `File` 消息段在不同平台支持程度不同；如果平台不支持文件消息，下载可能成功但发送失败。
 

@@ -121,6 +121,12 @@
     "hint": "群号列表，为空则不限制；私聊不受此限制",
     "default": []
   },
+  "user_blacklist": {
+    "description": "用户黑名单",
+    "type": "list",
+    "hint": "用户 ID 列表；命中后无法触发任何插件命令，管理员也会被拦截",
+    "default": []
+  },
   "auto_cleanup": {
     "description": "自动清理",
     "type": "bool",
